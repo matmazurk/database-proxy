@@ -15,6 +15,7 @@ func main() {
 		TLSCA:       os.Getenv("TLS_CA"),
 		PGAddr:      envOrDefault("PG_ADDR", "localhost:5432"),
 		VaultAddr:   envOrDefault("VAULT_ADDR", "http://localhost:8200"),
+		VaultToken:  os.Getenv("VAULT_TOKEN"),
 		VaultDBRole: envOrDefault("VAULT_DB_ROLE", "readonly"),
 	}
 

@@ -1,11 +1,7 @@
 package proxy
 
 import (
-	"crypto"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"net/http"
 
 	vaultapi "github.com/hashicorp/vault/api"
 )
@@ -16,48 +12,25 @@ type DBCredentials struct {
 }
 
 type VaultClient struct {
-	addr   string
-	caPool *x509.CertPool
+	client *vaultapi.Client
 }
 
-func NewVaultClient(addr string, caPool *x509.CertPool) *VaultClient {
-	return &VaultClient{addr: addr, caPool: caPool}
-}
-
-// GetDBCredentials authenticates to Vault using the client cert via TLS cert auth,
-// then fetches dynamic database credentials for the given role.
-func (v *VaultClient) GetDBCredentials(clientCert *x509.Certificate, clientKey crypto.PrivateKey, role string) (*DBCredentials, error) {
-	tlsCert := tls.Certificate{
-		Certificate: [][]byte{clientCert.Raw},
-		PrivateKey:  clientKey,
-	}
-
+func NewVaultClient(addr, token string) (*VaultClient, error) {
 	vaultCfg := vaultapi.DefaultConfig()
-	vaultCfg.Address = v.addr
-	vaultCfg.HttpClient = &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{tlsCert},
-				RootCAs:      v.caPool,
-			},
-		},
-	}
+	vaultCfg.Address = addr
 
 	client, err := vaultapi.NewClient(vaultCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating Vault client: %w", err)
 	}
+	client.SetToken(token)
 
-	secret, err := client.Logical().Write("auth/cert/login", nil)
-	if err != nil {
-		return nil, fmt.Errorf("Vault cert auth: %w", err)
-	}
-	if secret == nil || secret.Auth == nil {
-		return nil, fmt.Errorf("Vault cert auth returned no token")
-	}
-	client.SetToken(secret.Auth.ClientToken)
+	return &VaultClient{client: client}, nil
+}
 
-	creds, err := client.Logical().Read("database/creds/" + role)
+// GetDBCredentials fetches dynamic database credentials from Vault for the given role.
+func (v *VaultClient) GetDBCredentials(role string) (*DBCredentials, error) {
+	creds, err := v.client.Logical().Read("database/creds/" + role)
 	if err != nil {
 		return nil, fmt.Errorf("fetching DB credentials: %w", err)
 	}

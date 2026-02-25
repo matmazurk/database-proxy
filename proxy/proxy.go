@@ -18,6 +18,7 @@ type Config struct {
 	TLSCA       string
 	PGAddr      string
 	VaultAddr   string
+	VaultToken  string
 	VaultDBRole string
 }
 
@@ -48,10 +49,15 @@ func New(cfg Config) (*Proxy, error) {
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 	}
 
+	vaultClient, err := NewVaultClient(cfg.VaultAddr, cfg.VaultToken)
+	if err != nil {
+		return nil, fmt.Errorf("creating Vault client: %w", err)
+	}
+
 	return &Proxy{
 		cfg:         cfg,
 		tlsConfig:   tlsConfig,
-		vaultClient: NewVaultClient(cfg.VaultAddr, caPool),
+		vaultClient: vaultClient,
 	}, nil
 }
 
@@ -119,12 +125,8 @@ func (p *Proxy) handleConnection(clientRaw net.Conn) {
 	database := params["database"]
 	log.Printf("client requests database: %s", database)
 
-	// 5. Auth to Vault and get DB credentials
-	// Note: for TLS cert auth to Vault, we need the client's private key too.
-	// Since we only have the cert from the TLS handshake (not the private key),
-	// the proxy will use its own TLS keypair to auth to Vault on behalf of the client.
-	// The Vault cert auth role is configured to trust certs signed by the same CA.
-	creds, err := p.vaultClient.GetDBCredentials(clientCert, p.tlsConfig.Certificates[0].PrivateKey, p.cfg.VaultDBRole)
+	// 5. Get DB credentials from Vault
+	creds, err := p.vaultClient.GetDBCredentials(p.cfg.VaultDBRole)
 	if err != nil {
 		log.Printf("Vault get creds failed: %v", err)
 		return
