@@ -6,7 +6,7 @@
 
 **Architecture:** Auth intercept + raw TCP relay. The proxy parses PostgreSQL wire protocol only during startup/auth, then switches to bidirectional `io.Copy`. Vault's TLS cert auth method authenticates clients, and Vault's database secrets engine provides dynamic PostgreSQL credentials.
 
-**Tech Stack:** Go, PostgreSQL wire protocol, HashiCorp Vault (TLS cert auth + database secrets engine), Docker Compose
+**Tech Stack:** Go, PostgreSQL wire protocol, HashiCorp Vault SDK (`github.com/hashicorp/vault/api`, TLS cert auth + database secrets engine), Docker Compose
 
 ---
 
@@ -445,141 +445,110 @@ git commit -m "add SCRAM-SHA-256 auth client"
 **Files:**
 - Create: `proxy/vault.go`
 
-**Step 1: Implement Vault client**
+Uses the official Vault SDK (`github.com/hashicorp/vault/api`) and its TLS cert auth method.
 
-Uses Vault HTTP API directly (no Vault SDK to keep dependencies minimal).
+**Step 1: Implement Vault client**
 
 ```go
 package proxy
 
 import (
-	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
-	"encoding/pem"
 	"fmt"
-	"io"
 	"net/http"
-)
 
-type VaultClient struct {
-	addr   string
-	client *http.Client
-}
+	vaultapi "github.com/hashicorp/vault/api"
+)
 
 type DBCredentials struct {
 	Username string
 	Password string
 }
 
-func NewVaultClient(addr string) *VaultClient {
-	return &VaultClient{
-		addr:   addr,
-		client: &http.Client{},
-	}
+type VaultClient struct {
+	addr string
 }
 
-// AuthWithCert authenticates to Vault using the TLS cert auth method.
-// Takes the client certificate from the proxy's TLS connection.
-// Returns a Vault token.
-func (v *VaultClient) AuthWithCert(clientCert *x509.Certificate) (string, error) {
-	// Encode cert to PEM
-	pemBlock := pem.EncodeToMemory(&pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: clientCert.Raw,
-	})
+func NewVaultClient(addr string) *VaultClient {
+	return &VaultClient{addr: addr}
+}
 
-	body, _ := json.Marshal(map[string]string{})
-	req, err := http.NewRequest("POST", v.addr+"/v1/auth/cert/login", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("creating request: %w", err)
+// GetDBCredentials authenticates to Vault using the client cert via TLS cert auth,
+// then fetches dynamic database credentials for the given role.
+func (v *VaultClient) GetDBCredentials(clientCert *x509.Certificate, clientKey interface{}, role string) (*DBCredentials, error) {
+	// Build a TLS certificate from the raw client cert + key
+	tlsCert := tls.Certificate{
+		Certificate: [][]byte{clientCert.Raw},
+		PrivateKey:  clientKey,
 	}
 
-	// For TLS cert auth, we need to present the client cert in the TLS connection to Vault.
-	// Create a custom transport with the client cert.
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, // PoC only - Vault in dev mode
-			Certificates: []tls.Certificate{
-				{
-					Certificate: [][]byte{clientCert.Raw},
-				},
+	// Create Vault client with custom TLS transport presenting the client cert
+	vaultCfg := vaultapi.DefaultConfig()
+	vaultCfg.Address = v.addr
+	vaultCfg.HttpClient = &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates:       []tls.Certificate{tlsCert},
+				InsecureSkipVerify: true, // PoC only - Vault in dev mode
 			},
 		},
 	}
-	_ = pemBlock // cert is passed via TLS, not in request body
-	client := &http.Client{Transport: transport}
 
-	resp, err := client.Do(req)
+	client, err := vaultapi.NewClient(vaultCfg)
 	if err != nil {
-		return "", fmt.Errorf("auth request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("auth failed (status %d): %s", resp.StatusCode, respBody)
+		return nil, fmt.Errorf("creating Vault client: %w", err)
 	}
 
-	var result struct {
-		Auth struct {
-			ClientToken string `json:"client_token"`
-		} `json:"auth"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decoding response: %w", err)
-	}
-
-	return result.Auth.ClientToken, nil
-}
-
-// GetDBCredentials requests dynamic database credentials from Vault.
-func (v *VaultClient) GetDBCredentials(token, role string) (*DBCredentials, error) {
-	req, err := http.NewRequest("GET", v.addr+"/v1/database/creds/"+role, nil)
+	// Authenticate via TLS cert auth method
+	secret, err := client.Logical().Write("auth/cert/login", nil)
 	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+		return nil, fmt.Errorf("Vault cert auth: %w", err)
 	}
-	req.Header.Set("X-Vault-Token", token)
+	if secret == nil || secret.Auth == nil {
+		return nil, fmt.Errorf("Vault cert auth returned no token")
+	}
+	client.SetToken(secret.Auth.ClientToken)
 
-	resp, err := v.client.Do(req)
+	// Fetch dynamic DB credentials
+	creds, err := client.Logical().Read("database/creds/" + role)
 	if err != nil {
-		return nil, fmt.Errorf("creds request: %w", err)
+		return nil, fmt.Errorf("fetching DB credentials: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("creds failed (status %d): %s", resp.StatusCode, respBody)
+	if creds == nil || creds.Data == nil {
+		return nil, fmt.Errorf("no credentials returned for role %s", role)
 	}
 
-	var result struct {
-		Data struct {
-			Username string `json:"username"`
-			Password string `json:"password"`
-		} `json:"data"`
+	username, ok := creds.Data["username"].(string)
+	if !ok {
+		return nil, fmt.Errorf("unexpected username type")
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
+	password, ok := creds.Data["password"].(string)
+	if !ok {
+		return nil, fmt.Errorf("unexpected password type")
 	}
 
 	return &DBCredentials{
-		Username: result.Data.Username,
-		Password: result.Data.Password,
+		Username: username,
+		Password: password,
 	}, nil
 }
 ```
 
-**Step 2: Verify it compiles**
+**Step 2: Add dependency**
+
+Run: `go get github.com/hashicorp/vault/api`
+
+**Step 3: Verify it compiles**
 
 Run: `go build ./proxy/...`
 Expected: no errors
 
-**Step 3: Commit**
+**Step 4: Commit**
 
 ```bash
-git add proxy/vault.go
-git commit -m "add Vault client for cert auth and credential fetch"
+git add proxy/vault.go go.mod go.sum
+git commit -m "add Vault client using official SDK"
 ```
 
 ---
@@ -711,13 +680,11 @@ func (p *Proxy) handleConnection(clientRaw net.Conn) {
 	log.Printf("client requests database: %s", database)
 
 	// 5. Auth to Vault and get DB credentials
-	vaultToken, err := p.vaultClient.AuthWithCert(clientCert)
-	if err != nil {
-		log.Printf("Vault auth failed: %v", err)
-		return
-	}
-
-	creds, err := p.vaultClient.GetDBCredentials(vaultToken, p.cfg.VaultDBRole)
+	// Note: for TLS cert auth to Vault, we need the client's private key too.
+	// Since we only have the cert from the TLS handshake (not the private key),
+	// the proxy will use its own TLS keypair to auth to Vault on behalf of the client.
+	// The Vault cert auth role is configured to trust certs signed by the same CA.
+	creds, err := p.vaultClient.GetDBCredentials(clientCert, p.tlsConfig.Certificates[0].PrivateKey, p.cfg.VaultDBRole)
 	if err != nil {
 		log.Printf("Vault get creds failed: %v", err)
 		return
@@ -814,28 +781,37 @@ git commit -m "add proxy core connection handler"
 **Files:**
 - Modify: `main.go`
 
-**Step 1: Wire up main.go with flags**
+**Step 1: Wire up main.go with environment variables**
+
+Environment variables:
+- `LISTEN_ADDR` (default `:5555`)
+- `TLS_CERT` - path to proxy TLS certificate
+- `TLS_KEY` - path to proxy TLS private key
+- `TLS_CA` - path to CA certificate for client cert verification
+- `PG_ADDR` (default `localhost:5432`)
+- `VAULT_ADDR` (default `http://localhost:8200`)
+- `VAULT_DB_ROLE` (default `readonly`)
 
 ```go
 package main
 
 import (
-	"flag"
 	"log"
+	"os"
 
 	"github.com/matmazurk/database-proxy/proxy"
 )
 
 func main() {
-	cfg := proxy.Config{}
-	flag.StringVar(&cfg.ListenAddr, "listen", ":5555", "proxy listen address")
-	flag.StringVar(&cfg.TLSCert, "tls-cert", "", "path to proxy TLS certificate")
-	flag.StringVar(&cfg.TLSKey, "tls-key", "", "path to proxy TLS private key")
-	flag.StringVar(&cfg.TLSCA, "tls-ca", "", "path to CA certificate for client cert verification")
-	flag.StringVar(&cfg.PGAddr, "pg-addr", "localhost:5432", "PostgreSQL address")
-	flag.StringVar(&cfg.VaultAddr, "vault-addr", "http://localhost:8200", "Vault address")
-	flag.StringVar(&cfg.VaultDBRole, "vault-db-role", "readonly", "Vault database role name")
-	flag.Parse()
+	cfg := proxy.Config{
+		ListenAddr:  envOrDefault("LISTEN_ADDR", ":5555"),
+		TLSCert:     os.Getenv("TLS_CERT"),
+		TLSKey:      os.Getenv("TLS_KEY"),
+		TLSCA:       os.Getenv("TLS_CA"),
+		PGAddr:      envOrDefault("PG_ADDR", "localhost:5432"),
+		VaultAddr:   envOrDefault("VAULT_ADDR", "http://localhost:8200"),
+		VaultDBRole: envOrDefault("VAULT_DB_ROLE", "readonly"),
+	}
 
 	p, err := proxy.New(cfg)
 	if err != nil {
@@ -843,6 +819,13 @@ func main() {
 	}
 
 	log.Fatal(p.Listen())
+}
+
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 ```
 
@@ -855,7 +838,7 @@ Expected: binary builds successfully
 
 ```bash
 git add main.go
-git commit -m "wire up main entry point with flags"
+git commit -m "wire up main entry point with env vars"
 ```
 
 ---
@@ -943,14 +926,14 @@ services:
       - "5555:5555"
     volumes:
       - ./certs/out:/certs:ro
-    command:
-      - "-listen=:5555"
-      - "-tls-cert=/certs/proxy-server.crt"
-      - "-tls-key=/certs/proxy-server.key"
-      - "-tls-ca=/certs/ca.crt"
-      - "-pg-addr=postgres:5432"
-      - "-vault-addr=http://vault:8200"
-      - "-vault-db-role=readonly"
+    environment:
+      LISTEN_ADDR: ":5555"
+      TLS_CERT: /certs/proxy-server.crt
+      TLS_KEY: /certs/proxy-server.key
+      TLS_CA: /certs/ca.crt
+      PG_ADDR: postgres:5432
+      VAULT_ADDR: http://vault:8200
+      VAULT_DB_ROLE: readonly
 ```
 
 **Step 3: Create vault/setup.sh**
