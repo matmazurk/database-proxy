@@ -37,7 +37,7 @@ Single Go binary. Each client connection:
 
 1. Proxy sends SSLRequest to PostgreSQL -> if `S`, upgrades to TLS
 2. Proxy sends StartupMessage with Vault-issued username
-3. Proxy handles PostgreSQL auth challenge (MD5 or SCRAM-SHA-256) using Vault-issued password
+3. Proxy handles PostgreSQL SCRAM-SHA-256 auth challenge using Vault-issued password
 4. Waits for ReadyForQuery from PostgreSQL
 
 ### After both sides ready
