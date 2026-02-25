@@ -15,21 +15,42 @@ type VaultClient struct {
 	client *vaultapi.Client
 }
 
-func NewVaultClient(addr, token string) (*VaultClient, error) {
+func NewVaultClient(addr, caCert, clientCert, clientKey string) (*VaultClient, error) {
 	vaultCfg := vaultapi.DefaultConfig()
 	vaultCfg.Address = addr
+
+	tlsCfg := &vaultapi.TLSConfig{
+		CACert:     caCert,
+		ClientCert: clientCert,
+		ClientKey:  clientKey,
+	}
+	if err := vaultCfg.ConfigureTLS(tlsCfg); err != nil {
+		return nil, fmt.Errorf("configuring Vault TLS: %w", err)
+	}
 
 	client, err := vaultapi.NewClient(vaultCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating Vault client: %w", err)
 	}
-	client.SetToken(token)
+	client.ClearToken()
 
 	return &VaultClient{client: client}, nil
 }
 
-// GetDBCredentials fetches dynamic database credentials from Vault for the given role.
+// GetDBCredentials authenticates to Vault using TLS cert auth and fetches
+// dynamic database credentials for the given role.
 func (v *VaultClient) GetDBCredentials(role string) (*DBCredentials, error) {
+	// Authenticate via TLS cert auth
+	secret, err := v.client.Logical().Write("auth/cert/login", nil)
+	if err != nil {
+		return nil, fmt.Errorf("cert auth login: %w", err)
+	}
+	if secret == nil || secret.Auth == nil {
+		return nil, fmt.Errorf("no auth info returned from cert login")
+	}
+	v.client.SetToken(secret.Auth.ClientToken)
+
+	// Fetch DB credentials
 	creds, err := v.client.Logical().Read("database/creds/" + role)
 	if err != nil {
 		return nil, fmt.Errorf("fetching DB credentials: %w", err)

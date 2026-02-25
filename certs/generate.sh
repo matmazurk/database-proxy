@@ -6,10 +6,12 @@ OUT="$DIR/out"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
-# CA
+# CA (v3 with basicConstraints CA:TRUE)
 openssl genrsa -out "$OUT/ca.key" 2048
 openssl req -new -x509 -key "$OUT/ca.key" -out "$OUT/ca.crt" -days 365 \
-  -subj "/CN=database-proxy-ca"
+  -subj "/CN=database-proxy-ca" \
+  -addext "basicConstraints=critical,CA:TRUE" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign"
 
 # Proxy server cert
 openssl genrsa -out "$OUT/proxy-server.key" 2048

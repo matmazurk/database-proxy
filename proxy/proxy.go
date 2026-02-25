@@ -18,7 +18,7 @@ type Config struct {
 	TLSCA       string
 	PGAddr      string
 	VaultAddr   string
-	VaultToken  string
+	VaultCACert string
 	VaultDBRole string
 }
 
@@ -49,7 +49,12 @@ func New(cfg Config) (*Proxy, error) {
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 	}
 
-	vaultClient, err := NewVaultClient(cfg.VaultAddr, cfg.VaultToken)
+	vaultCACert := cfg.VaultCACert
+	if vaultCACert == "" {
+		vaultCACert = cfg.TLSCA
+	}
+
+	vaultClient, err := NewVaultClient(cfg.VaultAddr, vaultCACert, cfg.TLSCert, cfg.TLSKey)
 	if err != nil {
 		return nil, fmt.Errorf("creating Vault client: %w", err)
 	}

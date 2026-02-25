@@ -1,6 +1,20 @@
 #!/bin/sh
 set -e
 
+# Install jq for JSON parsing
+apk add --no-cache jq > /dev/null
+
+# Initialize Vault (single key share for simplicity)
+INIT_OUTPUT=$(vault operator init -key-shares=1 -key-threshold=1 -format=json)
+UNSEAL_KEY=$(echo "$INIT_OUTPUT" | jq -r '.unseal_keys_b64[0]')
+ROOT_TOKEN=$(echo "$INIT_OUTPUT" | jq -r '.root_token')
+
+# Unseal Vault
+vault operator unseal "$UNSEAL_KEY" > /dev/null
+
+# Authenticate with root token for setup
+export VAULT_TOKEN="$ROOT_TOKEN"
+
 # Enable cert auth
 vault auth enable cert
 
