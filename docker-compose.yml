@@ -25,7 +25,7 @@ services:
       - ./certs/out:/certs:ro
       - ./vault:/vault-setup:ro
     healthcheck:
-      test: ["CMD", "vault", "status"]
+      test: ["CMD-SHELL", "VAULT_ADDR=http://127.0.0.1:8200 vault status"]
       interval: 2s
       timeout: 5s
       retries: 10
