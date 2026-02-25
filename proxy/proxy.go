@@ -51,7 +51,7 @@ func New(cfg Config) (*Proxy, error) {
 	return &Proxy{
 		cfg:         cfg,
 		tlsConfig:   tlsConfig,
-		vaultClient: NewVaultClient(cfg.VaultAddr),
+		vaultClient: NewVaultClient(cfg.VaultAddr, caPool),
 	}, nil
 }
 

@@ -19,13 +19,15 @@ services:
     environment:
       VAULT_DEV_ROOT_TOKEN_ID: root
       VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      VAULT_DEV_TLS_CERT_DIR: /vault-tls
     ports:
       - "8200:8200"
     volumes:
       - ./certs/out:/certs:ro
+      - ./certs/out/vault-tls:/vault-tls:ro
       - ./vault:/vault-setup:ro
     healthcheck:
-      test: ["CMD-SHELL", "VAULT_ADDR=http://127.0.0.1:8200 vault status"]
+      test: ["CMD-SHELL", "VAULT_ADDR=https://127.0.0.1:8200 VAULT_CACERT=/vault-tls/tls.crt vault status"]
       interval: 2s
       timeout: 5s
       retries: 10
@@ -38,7 +40,8 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      VAULT_ADDR: "http://vault:8200"
+      VAULT_ADDR: "https://vault:8200"
+      VAULT_CACERT: /certs/ca.crt
       VAULT_TOKEN: root
     volumes:
       - ./certs/out:/certs:ro
@@ -62,5 +65,5 @@ services:
       TLS_KEY: /certs/proxy-server.key
       TLS_CA: /certs/ca.crt
       PG_ADDR: postgres:5432
-      VAULT_ADDR: http://vault:8200
+      VAULT_ADDR: https://vault:8200
       VAULT_DB_ROLE: readonly

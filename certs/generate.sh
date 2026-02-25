@@ -19,12 +19,26 @@ openssl x509 -req -in "$OUT/proxy-server.csr" -CA "$OUT/ca.crt" -CAkey "$OUT/ca.
   -CAcreateserial -out "$OUT/proxy-server.crt" -days 365 \
   -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1")
 
+# Vault server cert
+openssl genrsa -out "$OUT/vault-server.key" 2048
+openssl req -new -key "$OUT/vault-server.key" -out "$OUT/vault-server.csr" \
+  -subj "/CN=vault"
+openssl x509 -req -in "$OUT/vault-server.csr" -CA "$OUT/ca.crt" -CAkey "$OUT/ca.key" \
+  -CAcreateserial -out "$OUT/vault-server.crt" -days 365 \
+  -extfile <(printf "subjectAltName=DNS:vault,DNS:localhost,IP:127.0.0.1")
+
 # Client cert (used by psql to connect to proxy, and by proxy to auth to Vault)
 openssl genrsa -out "$OUT/client.key" 2048
 openssl req -new -key "$OUT/client.key" -out "$OUT/client.csr" \
   -subj "/CN=test-client"
 openssl x509 -req -in "$OUT/client.csr" -CA "$OUT/ca.crt" -CAkey "$OUT/ca.key" \
   -CAcreateserial -out "$OUT/client.crt" -days 365
+
+# Vault TLS dir (VAULT_DEV_TLS_CERT_DIR expects tls.crt and tls.key)
+VAULT_TLS="$OUT/vault-tls"
+mkdir -p "$VAULT_TLS"
+cp "$OUT/vault-server.crt" "$VAULT_TLS/tls.crt"
+cp "$OUT/vault-server.key" "$VAULT_TLS/tls.key"
 
 # Cleanup CSRs
 rm -f "$OUT"/*.csr "$OUT"/*.srl

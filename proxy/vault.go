@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"crypto"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -15,30 +16,29 @@ type DBCredentials struct {
 }
 
 type VaultClient struct {
-	addr string
+	addr   string
+	caPool *x509.CertPool
 }
 
-func NewVaultClient(addr string) *VaultClient {
-	return &VaultClient{addr: addr}
+func NewVaultClient(addr string, caPool *x509.CertPool) *VaultClient {
+	return &VaultClient{addr: addr, caPool: caPool}
 }
 
 // GetDBCredentials authenticates to Vault using the client cert via TLS cert auth,
 // then fetches dynamic database credentials for the given role.
-func (v *VaultClient) GetDBCredentials(clientCert *x509.Certificate, clientKey interface{}, role string) (*DBCredentials, error) {
-	// Build a TLS certificate from the raw client cert + key
+func (v *VaultClient) GetDBCredentials(clientCert *x509.Certificate, clientKey crypto.PrivateKey, role string) (*DBCredentials, error) {
 	tlsCert := tls.Certificate{
 		Certificate: [][]byte{clientCert.Raw},
 		PrivateKey:  clientKey,
 	}
 
-	// Create Vault client with custom TLS transport presenting the client cert
 	vaultCfg := vaultapi.DefaultConfig()
 	vaultCfg.Address = v.addr
 	vaultCfg.HttpClient = &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				Certificates:       []tls.Certificate{tlsCert},
-				InsecureSkipVerify: true, // PoC only - Vault in dev mode
+				Certificates: []tls.Certificate{tlsCert},
+				RootCAs:      v.caPool,
 			},
 		},
 	}
@@ -48,7 +48,6 @@ func (v *VaultClient) GetDBCredentials(clientCert *x509.Certificate, clientKey i
 		return nil, fmt.Errorf("creating Vault client: %w", err)
 	}
 
-	// Authenticate via TLS cert auth method
 	secret, err := client.Logical().Write("auth/cert/login", nil)
 	if err != nil {
 		return nil, fmt.Errorf("Vault cert auth: %w", err)
@@ -58,7 +57,6 @@ func (v *VaultClient) GetDBCredentials(clientCert *x509.Certificate, clientKey i
 	}
 	client.SetToken(secret.Auth.ClientToken)
 
-	// Fetch dynamic DB credentials
 	creds, err := client.Logical().Read("database/creds/" + role)
 	if err != nil {
 		return nil, fmt.Errorf("fetching DB credentials: %w", err)
