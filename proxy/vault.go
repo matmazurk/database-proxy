@@ -11,11 +11,11 @@ type DBCredentials struct {
 	Password string
 }
 
-type VaultClient struct {
+type vaultClient struct {
 	client *vaultapi.Client
 }
 
-func NewVaultClient(addr, caCert, clientCert, clientKey string) (*VaultClient, error) {
+func newVaultClient(addr, caCert, clientCert, clientKey string) (*vaultClient, error) {
 	vaultCfg := vaultapi.DefaultConfig()
 	vaultCfg.Address = addr
 
@@ -34,12 +34,12 @@ func NewVaultClient(addr, caCert, clientCert, clientKey string) (*VaultClient, e
 	}
 	client.ClearToken()
 
-	return &VaultClient{client: client}, nil
+	return &vaultClient{client: client}, nil
 }
 
-// GetDBCredentials authenticates to Vault using TLS cert auth and fetches
+// getDBCredentials authenticates to Vault using TLS cert auth and fetches
 // dynamic database credentials for the given role.
-func (v *VaultClient) GetDBCredentials(role string) (*DBCredentials, error) {
+func (v *vaultClient) getDBCredentials(role string) (*DBCredentials, error) {
 	// Authenticate via TLS cert auth
 	secret, err := v.client.Logical().Write("auth/cert/login", nil)
 	if err != nil {

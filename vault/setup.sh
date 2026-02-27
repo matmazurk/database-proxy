@@ -24,9 +24,9 @@ vault write auth/cert/certs/proxy-client \
   policies="db-policy" \
   certificate=@/certs/ca.crt
 
-# Create policy for database creds
+# Create policy for database creds (wildcard to cover all roles)
 vault policy write db-policy - <<EOF
-path "database/creds/readonly" {
+path "database/creds/*" {
   capabilities = ["read"]
 }
 EOF
@@ -42,10 +42,30 @@ vault write database/config/postgres \
   username="postgres" \
   password="postgres"
 
-# Create readonly role
+# Create PostgreSQL readonly role
 vault write database/roles/readonly \
   db_name=postgres \
   creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; GRANT SELECT ON ALL TABLES IN SCHEMA public TO \"{{name}}\";" \
+  default_ttl="1h" \
+  max_ttl="24h"
+
+# Register Oracle plugin
+ORACLE_PLUGIN_SHA=$(sha256sum /vault/plugins/vault-plugin-database-oracle | cut -d' ' -f1)
+vault plugin register -sha256="$ORACLE_PLUGIN_SHA" \
+  database vault-plugin-database-oracle
+
+# Configure Oracle connection
+vault write database/config/oracle \
+  plugin_name=vault-plugin-database-oracle \
+  allowed_roles="oracle-readonly" \
+  connection_url="{{username}}/{{password}}@//oracle:1521/FREEPDB1" \
+  username="SYSTEM" \
+  password="oracle"
+
+# Create Oracle readonly role
+vault write database/roles/oracle-readonly \
+  db_name=oracle \
+  creation_statements='CREATE USER {{username}} IDENTIFIED BY "{{password}}"; GRANT CONNECT TO {{username}}; GRANT CREATE SESSION TO {{username}};' \
   default_ttl="1h" \
   max_ttl="24h"
 

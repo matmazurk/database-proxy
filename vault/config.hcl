@@ -10,5 +10,7 @@ listener "tcp" {
   tls_require_and_verify_client_cert = true
 }
 
+plugin_directory = "/vault/plugins"
+
 disable_mlock = true
 api_addr      = "https://vault:8200"

@@ -1,4 +1,4 @@
-package proxy
+package postgres
 
 import (
 	"encoding/binary"
@@ -11,7 +11,7 @@ import (
 // PerformSCRAMAuth performs SCRAM-SHA-256 authentication on a server connection.
 // The caller has already sent StartupMessage and read back an AuthenticationSASL
 // message (msgType 'R', status 10) whose payload lists supported mechanisms.
-func PerformSCRAMAuth(conn io.ReadWriter, password string, saslPayload []byte) error {
+func performSCRAMAuth(conn io.ReadWriter, password string, saslPayload []byte) error {
 	// Verify SCRAM-SHA-256 is offered
 	if !containsMechanism(saslPayload, "SCRAM-SHA-256") {
 		return fmt.Errorf("server does not support SCRAM-SHA-256")
@@ -35,7 +35,7 @@ func PerformSCRAMAuth(conn io.ReadWriter, password string, saslPayload []byte) e
 	}
 
 	// Read AuthenticationSASLContinue (type 'R', status 11)
-	msgType, payload, err := ReadMessage(conn)
+	msgType, payload, err := readMessage(conn)
 	if err != nil {
 		return fmt.Errorf("reading SASLContinue: %w", err)
 	}
@@ -51,12 +51,12 @@ func PerformSCRAMAuth(conn io.ReadWriter, password string, saslPayload []byte) e
 	}
 
 	// Send SASLResponse (password message type 'p')
-	if err := WriteMessage(conn, 'p', []byte(clientFinal)); err != nil {
+	if err := writeMessage(conn, 'p', []byte(clientFinal)); err != nil {
 		return fmt.Errorf("sending SASLResponse: %w", err)
 	}
 
 	// Read AuthenticationSASLFinal (type 'R', status 12)
-	msgType, payload, err = ReadMessage(conn)
+	msgType, payload, err = readMessage(conn)
 	if err != nil {
 		return fmt.Errorf("reading SASLFinal: %w", err)
 	}
@@ -72,7 +72,7 @@ func PerformSCRAMAuth(conn io.ReadWriter, password string, saslPayload []byte) e
 	}
 
 	// Read AuthenticationOk (type 'R', status 0)
-	msgType, payload, err = ReadMessage(conn)
+	msgType, payload, err = readMessage(conn)
 	if err != nil {
 		return fmt.Errorf("reading AuthenticationOk: %w", err)
 	}
@@ -112,5 +112,5 @@ func writeSASLInitialResponse(w io.Writer, mechanism string, data []byte) error 
 	binary.BigEndian.PutUint32(lenBytes, uint32(len(data)))
 	buf = append(buf, lenBytes...)
 	buf = append(buf, data...)
-	return WriteMessage(w, 'p', buf)
+	return writeMessage(w, 'p', buf)
 }
