@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	go_ora "github.com/sijms/go-ora/v2"
+	_ "github.com/godror/godror"
 )
 
 const (
@@ -32,8 +32,9 @@ func TestMain(m *testing.M) {
 
 func oracleDB(t *testing.T) *sql.DB {
 	t.Helper()
-	connStr := go_ora.BuildUrl("localhost", 5555, serviceName, oracleUser, oraclePass, nil)
-	db, err := sql.Open("oracle", connStr)
+	// godror DSN: user/pass@//host:port/service  (Easy Connect format)
+	dsn := oracleUser + "/" + oraclePass + "@//localhost:5555/" + serviceName
+	db, err := sql.Open("godror", dsn)
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
