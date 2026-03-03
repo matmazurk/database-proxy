@@ -77,7 +77,7 @@ func (h *Handler) ConnectAndAuth(dbAddr string, creds *proxy.DBCredentials, serv
 func (h *Handler) AcceptClient(clientIO io.ReadWriteCloser, dbConn net.Conn) error {
 	occ, ok := clientIO.(*clientConn_)
 	if !ok {
-		return fmt.Errorf("unexpected client connection type")
+		return fmt.Errorf("AcceptClient: expected *clientConn_, got %T", clientIO)
 	}
 
 	// Forward the original CONNECT to Oracle so it can complete its side of the handshake.
@@ -89,9 +89,13 @@ func (h *Handler) AcceptClient(clientIO io.ReadWriteCloser, dbConn net.Conn) err
 		return fmt.Errorf("forwarding CONNECT to oracle: %w", err)
 	}
 
-	// Read (and discard) Oracle's ACCEPT — we synthesise our own for the client below.
-	if _, err := readTNSPacket(dbConn); err != nil {
-		return fmt.Errorf("reading oracle ACCEPT: %w", err)
+	// Read Oracle's response to our forwarded CONNECT.
+	oraclePkt, err := readTNSPacket(dbConn)
+	if err != nil {
+		return fmt.Errorf("reading oracle response: %w", err)
+	}
+	if oraclePkt.packetType != tnsAccept {
+		return fmt.Errorf("expected TNS ACCEPT from oracle (type %d), got type %d", tnsAccept, oraclePkt.packetType)
 	}
 
 	// Tell the client auth succeeded.
