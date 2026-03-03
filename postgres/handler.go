@@ -105,7 +105,7 @@ func (h *Handler) ConnectAndAuth(dbAddr string, creds *proxy.DBCredentials, dbNa
 	return pgConn, nil
 }
 
-func (h *Handler) AcceptClient(clientIO io.ReadWriteCloser) error {
+func (h *Handler) AcceptClient(clientIO io.ReadWriteCloser, _ net.Conn) error {
 	if err := writeAuthenticationOk(clientIO); err != nil {
 		return fmt.Errorf("writing AuthOk to client: %w", err)
 	}

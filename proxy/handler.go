@@ -16,5 +16,5 @@ type DBHandler interface {
 	// Returns a raw connection suitable for io.Copy relay.
 	ConnectAndAuth(dbAddr string, creds *DBCredentials, dbName string) (net.Conn, error)
 	// AcceptClient tells the client that auth succeeded and it's ready for queries.
-	AcceptClient(clientIO io.ReadWriteCloser) error
+	AcceptClient(clientIO io.ReadWriteCloser, dbConn net.Conn) error
 }

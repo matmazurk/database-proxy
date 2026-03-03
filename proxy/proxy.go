@@ -114,7 +114,7 @@ func (p *Proxy) handleConnection(clientRaw net.Conn) {
 	defer dbConn.Close()
 
 	// 4. Tell client auth succeeded
-	if err := p.handler.AcceptClient(clientIO); err != nil {
+	if err := p.handler.AcceptClient(clientIO, dbConn); err != nil {
 		log.Printf("accepting client: %v", err)
 		return
 	}
