@@ -95,8 +95,7 @@ func TestOracleProxy_ConnectionCleanup(t *testing.T) {
 
 	for i := range numConns {
 		func() {
-			db := oracleDB(t)
-			defer db.Close()
+			db := oracleDB(t) // t.Cleanup in oracleDB closes db when test ends
 
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()

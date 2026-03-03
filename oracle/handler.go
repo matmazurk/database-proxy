@@ -57,15 +57,18 @@ func (h *Handler) ConnectAndAuth(dbAddr string, creds *proxy.DBCredentials, serv
 	}
 	defer db.Close()
 
-	// Verify credentials work
+	// Verify credentials work. This opens a full application-level connection via go-ora
+	// (which is then discarded by defer db.Close()) and a separate raw TCP socket below.
+	// Two connections are made per client intentionally: one to validate Vault creds, one
+	// for the relay. This is a deliberate PoC trade-off for simplicity.
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("oracle ping failed: %w", err)
 	}
 
 	log.Printf("oracle credentials verified for user=%s service=%s", creds.Username, serviceName)
 
-	// Now open a raw TCP connection to Oracle for the relay.
-	// We'll forward the client's CONNECT directly and relay all subsequent traffic.
+	// Open a raw TCP connection to Oracle for the relay. AcceptClient will complete the
+	// TNS CONNECT/ACCEPT handshake on this socket before traffic is relayed.
 	oracleConn, err := net.Dial("tcp", dbAddr)
 	if err != nil {
 		return nil, fmt.Errorf("raw connect to oracle: %w", err)
@@ -98,7 +101,9 @@ func (h *Handler) AcceptClient(clientIO io.ReadWriteCloser, dbConn net.Conn) err
 		return fmt.Errorf("expected TNS ACCEPT from oracle (type %d), got type %d", tnsAccept, oraclePkt.packetType)
 	}
 
-	// Tell the client auth succeeded.
+	// Tell the client auth succeeded. The ACCEPT payload is built from the client's CONNECT
+	// rather than mirrored from Oracle's ACCEPT. This means Oracle's negotiated SDU/TDU
+	// values are not propagated to the client — a known PoC trade-off.
 	acceptPayload := buildAcceptPayload(occ.connectPayload)
 	pkt := &tnsPacket{
 		packetType: tnsAccept,
