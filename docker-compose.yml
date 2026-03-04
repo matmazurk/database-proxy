@@ -83,5 +83,17 @@ services:
       VAULT_CA_CERT: /certs/ca.crt
       VAULT_DB_ROLE: ${VAULT_DB_ROLE:-readonly}
 
+  integration-test:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: Dockerfile.integration
+    depends_on:
+      proxy:
+        condition: service_started
+    environment:
+      PROXY_ADDR: proxy:5555
+      WAIT_FOR_PROXY: "60"
+
 volumes:
   vault-data:

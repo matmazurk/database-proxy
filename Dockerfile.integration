@@ -1,0 +1,56 @@
+# ── build stage ────────────────────────────────────────────────────────────────
+# Oracle Linux is used because Oracle Instant Client packages are available
+# from the built-in DNF repos without any extra configuration.
+FROM oraclelinux:9 AS builder
+
+# Oracle Instant Client: basic (shared libs) + devel (CGO headers) + gcc for CGO
+RUN dnf install -y oracle-instantclient-basic oracle-instantclient-devel gcc && \
+    dnf clean all
+
+# Register the Instant Client shared library directory with ldconfig so the
+# linker can find it during the go test -c build step.
+RUN find /usr/lib/oracle -name "libclntsh.so" -exec dirname {} \; \
+        | head -1 > /etc/ld.so.conf.d/oracle-instantclient.conf && \
+    ldconfig
+
+# Install Go (version must match go.mod)
+ARG GO_VERSION=1.25.4
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" \
+        | tar -C /usr/local -xz
+ENV PATH=/usr/local/go/bin:$PATH
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Compile the integration test binary.
+# CGO_CFLAGS/CGO_LDFLAGS point at the Instant Client SDK paths discovered at build time.
+RUN OIC_LIB=$(find /usr/lib/oracle   -name "libclntsh.so" -exec dirname {} \; | head -1) && \
+    OIC_INC=$(find /usr/include/oracle -name "oci.h"        -exec dirname {} \; | head -1) && \
+    CGO_ENABLED=1 \
+    CGO_CFLAGS="-I${OIC_INC}" \
+    CGO_LDFLAGS="-L${OIC_LIB}" \
+    go test -c ./integration/ -o /integration.test
+
+# ── runtime stage ──────────────────────────────────────────────────────────────
+FROM oraclelinux:9-slim AS runner
+
+# Only the runtime library; no SDK headers needed at run time.
+RUN dnf install -y oracle-instantclient-basic && \
+    dnf clean all && \
+    find /usr/lib/oracle -name "libclntsh.so" -exec dirname {} \; \
+        | head -1 > /etc/ld.so.conf.d/oracle-instantclient.conf && \
+    ldconfig
+
+COPY --from=builder /integration.test /integration.test
+
+# Default: connect to the "proxy" service on the docker-compose network.
+# Override PROXY_ADDR if running outside of docker-compose.
+ENV PROXY_ADDR=proxy:5555
+# Retry connecting to the proxy for up to 60 s before giving up (exit 1).
+ENV WAIT_FOR_PROXY=60
+
+ENTRYPOINT ["/integration.test"]
+CMD ["-test.v", "-test.timeout=120s"]

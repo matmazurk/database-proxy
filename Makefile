@@ -1,4 +1,4 @@
-.PHONY: build run certs up up-oracle down
+.PHONY: build run certs up up-oracle test-oracle down
 
 build:
 	go build -o bin/database-proxy .
@@ -14,6 +14,11 @@ up: certs
 
 up-oracle: certs
 	DB_TYPE=oracle DB_ADDR=oracle:1521 VAULT_DB_ROLE=oracle-readonly docker compose up --build
+
+test-oracle: certs
+	DB_TYPE=oracle DB_ADDR=oracle:1521 VAULT_DB_ROLE=oracle-readonly \
+		docker compose --profile test up --build \
+		--exit-code-from integration-test integration-test
 
 down:
 	docker compose down -v

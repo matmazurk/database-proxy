@@ -13,27 +13,53 @@ import (
 )
 
 const (
-	proxyAddr   = "localhost:5555"
 	serviceName = "FREEPDB1"
 	oracleUser  = "SYSTEM"
 	oraclePass  = "oracle"
 )
 
-func TestMain(m *testing.M) {
-	conn, err := net.DialTimeout("tcp", proxyAddr, time.Second)
-	if err != nil {
-		fmt.Printf("oracle proxy not reachable at %s — skipping integration tests\n", proxyAddr)
-		fmt.Printf("start the stack with: make up-oracle\n")
-		os.Exit(0)
+// proxyAddr is the address of the proxy under test.
+// Override with PROXY_ADDR env var (e.g. "proxy:5555" when running inside docker-compose).
+var proxyAddr = func() string {
+	if v := os.Getenv("PROXY_ADDR"); v != "" {
+		return v
 	}
-	conn.Close()
+	return "localhost:5555"
+}()
+
+func TestMain(m *testing.M) {
+	// WAIT_FOR_PROXY (seconds): when set, retry until the proxy is reachable or the
+	// deadline expires. Exits 1 on timeout so the test container fails loudly in CI.
+	// Without it (local dev), exit 0 immediately so `go test ./...` does not fail when
+	// the stack is not running.
+	waitSecs := 0
+	fmt.Sscanf(os.Getenv("WAIT_FOR_PROXY"), "%d", &waitSecs)
+	deadline := time.Now().Add(time.Duration(waitSecs) * time.Second)
+
+	for {
+		conn, err := net.DialTimeout("tcp", proxyAddr, time.Second)
+		if err == nil {
+			conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			if waitSecs > 0 {
+				fmt.Printf("oracle proxy not reachable at %s after %ds\n", proxyAddr, waitSecs)
+				os.Exit(1)
+			}
+			fmt.Printf("oracle proxy not reachable at %s — skipping integration tests\n", proxyAddr)
+			fmt.Println("start the stack with: make up-oracle")
+			os.Exit(0)
+		}
+		time.Sleep(time.Second)
+	}
 	os.Exit(m.Run())
 }
 
 func oracleDB(t *testing.T) *sql.DB {
 	t.Helper()
 	// godror DSN: user/pass@//host:port/service  (Easy Connect format)
-	dsn := oracleUser + "/" + oraclePass + "@//localhost:5555/" + serviceName
+	dsn := oracleUser + "/" + oraclePass + "@//" + proxyAddr + "/" + serviceName
 	db, err := sql.Open("godror", dsn)
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
