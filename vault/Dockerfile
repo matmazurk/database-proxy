@@ -30,10 +30,10 @@ ARG VAULT_VERSION=1.15.6
 
 # Oracle IC runtime (needed by the CGO vault plugin), plus tools needed to
 # start vault and drop privileges.
-RUN dnf install -y \
+RUN microdnf install -y \
         oracle-instantclient-basic \
         curl unzip libcap shadow-utils util-linux && \
-    dnf clean all && \
+    microdnf clean all && \
     find /usr/lib/oracle -name "libclntsh.so" -exec dirname {} \; \
         | head -1 > /etc/ld.so.conf.d/oracle-instantclient.conf && \
     ldconfig

@@ -38,8 +38,8 @@ RUN OIC_LIB=$(find /usr/lib/oracle   -name "libclntsh.so" -exec dirname {} \; | 
 FROM oraclelinux:9-slim AS runner
 
 # Only the runtime library; no SDK headers needed at run time.
-RUN dnf install -y oracle-instantclient-basic && \
-    dnf clean all && \
+RUN microdnf install -y oracle-instantclient-basic && \
+    microdnf clean all && \
     find /usr/lib/oracle -name "libclntsh.so" -exec dirname {} \; \
         | head -1 > /etc/ld.so.conf.d/oracle-instantclient.conf && \
     ldconfig
