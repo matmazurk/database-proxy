@@ -34,7 +34,7 @@ services:
       - ./certs/out:/certs:ro
       - ./vault:/vault-config:ro
       - vault-data:/vault/data
-    command: sh -c "chown -R vault:vault /vault/data && su-exec vault vault server -config=/vault-config/config.hcl"
+    command: sh -c "chown -R vault:vault /vault/data && runuser -u vault -- vault server -config=/vault-config/config.hcl"
     user: root
     healthcheck:
       test: ["CMD-SHELL", "VAULT_ADDR=https://127.0.0.1:8200 VAULT_CACERT=/certs/ca.crt VAULT_CLIENT_CERT=/certs/proxy-server.crt VAULT_CLIENT_KEY=/certs/proxy-server.key vault status || [ $? -eq 2 ]"]
