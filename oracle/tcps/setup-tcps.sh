@@ -21,6 +21,6 @@ TNS_DIR="${ORACLE_HOME}/network/admin"
 cp /tcps-config/sqlnet.ora "${TNS_DIR}/sqlnet.ora"
 cp /tcps-config/listener.ora "${TNS_DIR}/listener.ora"
 
-# Restart the listener to register the new TCPS endpoint.
-lsnrctl stop
-lsnrctl start
+# Reload the listener to activate the new TCPS endpoint without dropping
+# existing service registrations (avoids ORA-12514 race on first startup).
+lsnrctl reload
