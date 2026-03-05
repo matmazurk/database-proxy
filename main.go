@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/matmazurk/database-proxy/mysql"
 	"github.com/matmazurk/database-proxy/oracle"
 	"github.com/matmazurk/database-proxy/postgres"
 	"github.com/matmazurk/database-proxy/proxy"
@@ -19,6 +20,8 @@ func main() {
 	switch dbType {
 	case "postgres":
 		handler = &postgres.Handler{}
+	case "mysql":
+		handler = &mysql.Handler{}
 	case "oracle":
 		oracleTLSConfig, err := buildOracleTLSConfig(os.Getenv("TLS_CA"))
 		if err != nil {
