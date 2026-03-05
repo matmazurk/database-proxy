@@ -81,15 +81,15 @@ func buildInitialHandshake(connID uint32, challenge []byte) []byte {
 		capProtocol41 | capSSL | capSecureConn | capPluginAuth
 
 	var b bytes.Buffer
-	b.WriteByte(10)                                        // protocol version
-	b.WriteString("8.0.0-proxy\x00")                      // server version
-	binary.Write(&b, binary.LittleEndian, connID)         // connection id
-	b.Write(challenge[:8])                                 // auth-plugin-data-part-1
-	b.WriteByte(0x00)                                      // filler
-	binary.Write(&b, binary.LittleEndian, uint16(caps))   // capability flags (lower 2 bytes)
-	b.WriteByte(0x21)                                      // character set: utf8
-	binary.Write(&b, binary.LittleEndian, uint16(0x0002)) // status flags: SERVER_STATUS_AUTOCOMMIT
-	binary.Write(&b, binary.LittleEndian, uint16(caps>>16)) // capability flags (upper 2 bytes)
+	b.WriteByte(10)                                                          // protocol version
+	b.WriteString("8.0.0-proxy\x00")                                        // server version
+	_ = binary.Write(&b, binary.LittleEndian, connID)                       // connection id
+	b.Write(challenge[:8])                                                   // auth-plugin-data-part-1
+	b.WriteByte(0x00)                                                        // filler
+	_ = binary.Write(&b, binary.LittleEndian, uint16(caps))                 // capability flags (lower 2 bytes)
+	b.WriteByte(0x21)                                                        // character set: utf8
+	_ = binary.Write(&b, binary.LittleEndian, uint16(0x0002))               // status flags: SERVER_STATUS_AUTOCOMMIT
+	_ = binary.Write(&b, binary.LittleEndian, uint16(caps>>16))             // capability flags (upper 2 bytes)
 	b.WriteByte(21)                                        // auth plugin data length (20 bytes + null)
 	b.Write(make([]byte, 10))                              // reserved
 	b.Write(challenge[8:])                                 // auth-plugin-data-part-2 (12 bytes)
@@ -232,8 +232,8 @@ func buildHandshakeResponse(username string, authData []byte, dbName string) []b
 		capProtocol41 | capSecureConn | capPluginAuth
 
 	var b bytes.Buffer
-	binary.Write(&b, binary.LittleEndian, caps)
-	binary.Write(&b, binary.LittleEndian, uint32(16777216)) // max packet size
+	_ = binary.Write(&b, binary.LittleEndian, caps)
+	_ = binary.Write(&b, binary.LittleEndian, uint32(16777216)) // max packet size
 	b.WriteByte(0x21)                                       // charset utf8
 	b.Write(make([]byte, 23))                               // reserved
 	b.WriteString(username)

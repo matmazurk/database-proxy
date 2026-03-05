@@ -29,6 +29,7 @@ func (h *Handler) HandleClient(clientConn net.Conn, tlsConfig *tls.Config) (io.R
 	}
 
 	// Read SSLRequest (seq=1). It is exactly 32 bytes: caps(4)+maxpkt(4)+charset(1)+reserved(23).
+	// seq is intentionally ignored — the SSLRequest sequence (expected: 1) is not verified.
 	_, payload, err := readPacket(clientConn)
 	if err != nil {
 		return nil, "", fmt.Errorf("reading SSL request: %w", err)
@@ -56,10 +57,12 @@ func (h *Handler) HandleClient(clientConn net.Conn, tlsConfig *tls.Config) (io.R
 	// Read HandshakeResponse41 (seq=2) over TLS.
 	seq, payload, err := readPacket(tlsConn)
 	if err != nil {
+		tlsConn.Close()
 		return nil, "", fmt.Errorf("reading HandshakeResponse: %w", err)
 	}
 	dbName, err := parseHandshakeResponse(payload)
 	if err != nil {
+		tlsConn.Close()
 		return nil, "", fmt.Errorf("parsing HandshakeResponse: %w", err)
 	}
 	log.Printf("mysql client requests database: %q", dbName)
