@@ -1,11 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-# orapki requires a JRE. gvenzl/oracle-free:23-slim does not include Java,
-# so we install a minimal headless JRE at container init time (once per volume).
-microdnf install -y java-17-openjdk-headless
-
-# Derive JAVA_HOME from the freshly installed java binary.
+# orapki requires Java. Java is pre-installed in the custom Oracle image (oracle/Dockerfile).
+# Derive JAVA_HOME from the java binary so orapki can find the JVM.
 JAVA_BIN=$(readlink -f "$(which java)")
 export JAVA_HOME="${JAVA_BIN%/bin/java}"
 
