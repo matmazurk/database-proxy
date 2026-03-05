@@ -95,6 +95,28 @@ func TestNativePasswordAuth_KnownAnswer(t *testing.T) {
 	}
 }
 
+func TestParseAuthSwitchRequest(t *testing.T) {
+	// Build a synthetic AuthSwitchRequest payload:
+	// 0xFE + "mysql_native_password\x00" + challenge + 0x00 (trailing null)
+	challenge := []byte("12345678901234567890")
+	var payload []byte
+	payload = append(payload, 0xFE)
+	payload = append(payload, []byte("mysql_native_password\x00")...)
+	payload = append(payload, challenge...)
+	payload = append(payload, 0x00) // trailing null that should be stripped
+
+	pluginName, gotChallenge, err := parseAuthSwitchRequest(payload)
+	if err != nil {
+		t.Fatalf("parseAuthSwitchRequest: %v", err)
+	}
+	if pluginName != "mysql_native_password" {
+		t.Fatalf("pluginName: want mysql_native_password, got %q", pluginName)
+	}
+	if !bytes.Equal(gotChallenge, challenge) {
+		t.Fatalf("challenge mismatch: want %x, got %x", challenge, gotChallenge)
+	}
+}
+
 func TestParseHandshakeResponse_ExtractsDBName(t *testing.T) {
 	caps := capProtocol41 | capSecureConn | capConnectWithDB | capPluginAuth
 

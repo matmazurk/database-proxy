@@ -48,6 +48,7 @@ func (h *Handler) HandleClient(clientConn net.Conn, tlsConfig *tls.Config) (io.R
 	serverTLS.ClientAuth = tls.RequireAndVerifyClientCert
 	tlsConn := tls.Server(clientConn, serverTLS)
 	if err := tlsConn.Handshake(); err != nil {
+		tlsConn.Close()
 		return nil, "", fmt.Errorf("TLS handshake: %w", err)
 	}
 	state := tlsConn.ConnectionState()
@@ -119,7 +120,8 @@ func (h *Handler) ConnectAndAuth(dbAddr string, creds *proxy.DBCredentials, dbNa
 	}
 
 	// Read server response: OK (0x00), AuthSwitchRequest (0xFE), or ERR (0xFF).
-	_, payload, err = readPacket(conn)
+	var authResponseSeq byte
+	authResponseSeq, payload, err = readPacket(conn)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("reading mysql auth response: %w", err)
@@ -148,7 +150,7 @@ func (h *Handler) ConnectAndAuth(dbAddr string, creds *proxy.DBCredentials, dbNa
 			return nil, fmt.Errorf("unexpected auth plugin switch to %q", pluginName)
 		}
 		switchResp := nativePasswordAuth(creds.Password, challenge)
-		if err := writePacket(conn, 3, switchResp); err != nil {
+		if err := writePacket(conn, authResponseSeq+1, switchResp); err != nil {
 			conn.Close()
 			return nil, fmt.Errorf("sending auth switch response: %w", err)
 		}
