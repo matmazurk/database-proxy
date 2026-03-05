@@ -118,46 +118,67 @@ func parseServiceName(connectPayload []byte) string {
 	return ""
 }
 
-// buildAcceptPayload builds a TNS ACCEPT packet payload.
-// It mirrors key parameters from the client's CONNECT packet.
+// buildAcceptPayload builds a TNS ACCEPT packet payload compatible with go-ora v2.
+//
+// go-ora's ACCEPT parser (newAcceptPacketFromData) requires:
+//  1. Total packet (8-byte TNS header + payload) >= 32 bytes.
+//  2. packetData[18:20] (accept data length) == len(packetData[dataOffset:]).
+//  3. For Version >= 315 (go-ora sends 317): uint32 SDU/TDU at packet bytes 32-39
+//     (payload bytes 24-31).
+//
+// So the payload must be exactly 32 bytes, making the total packet 40 bytes.
+// The dataOffset field (payload[12:14] = packet byte 20) must equal 40 so that
+// the accept-data slice is empty and accept data length 0 == 0 validates.
+//
+// Payload layout (offsets within payload; packet offset = payload offset + 8):
+//
+//	[0:2]   version              (echoed from CONNECT)
+//	[2:4]   negotiated options   (echoed service options from CONNECT)
+//	[4:6]   SDU size uint16      (echoed from CONNECT)
+//	[6:8]   TDU size uint16      (echoed from CONNECT)
+//	[8:10]  histone              (echoed from CONNECT)
+//	[10:12] accept data length   (0 — no extra data)
+//	[12:14] data offset          (40 — points past end of this 40-byte packet)
+//	[14]    connect flags 0      (echoed from CONNECT)
+//	[15]    connect flags 1      (echoed from CONNECT)
+//	[16:20] reserved             (zeros)
+//	[20:22] reconAddStart        (0)
+//	[22:24] reconAddLen          (0)
+//	[24:28] SDU size uint32      (version >= 315; echoed from CONNECT)
+//	[28:32] TDU size uint32      (version >= 315; echoed from CONNECT)
 func buildAcceptPayload(connectPayload []byte) []byte {
-	// ACCEPT payload layout:
-	//   [0:2]  version
-	//   [2:4]  service options
-	//   [4:6]  SDU size
-	//   [6:8]  TDU size
-	//   [8:10] value of 1 in hardware
-	//   [10:12] accept data length (0 — no data)
-	//   [12:14] accept data offset
-	//   [14]   connect flags 0
-	//   [15]   connect flags 1
-
-	accept := make([]byte, 16)
+	accept := make([]byte, 32)
 
 	if len(connectPayload) >= 26 {
-		// Copy version from connect
-		copy(accept[0:2], connectPayload[0:2])
-		// Copy service options
-		copy(accept[2:4], connectPayload[4:6])
-		// Copy SDU size
-		copy(accept[4:6], connectPayload[6:8])
-		// Copy TDU size
-		copy(accept[6:8], connectPayload[8:10])
-		// Copy value of 1 in hardware
-		copy(accept[8:10], connectPayload[14:16])
-		// Accept data length = 0
-		binary.BigEndian.PutUint16(accept[10:12], 0)
-		// Accept data offset
-		binary.BigEndian.PutUint16(accept[12:14], 16)
-		// Connect flags
-		accept[14] = connectPayload[24]
-		accept[15] = connectPayload[25]
+		copy(accept[0:2], connectPayload[0:2])  // version
+		copy(accept[2:4], connectPayload[4:6])  // service options
+		copy(accept[4:6], connectPayload[6:8])  // SDU uint16
+		copy(accept[6:8], connectPayload[8:10]) // TDU uint16
+		copy(accept[8:10], connectPayload[14:16]) // histone
+		accept[14] = connectPayload[24] // ACFL0
+		accept[15] = connectPayload[25] // ACFL1
 	} else {
-		// Defaults for minimal ACCEPT
 		binary.BigEndian.PutUint16(accept[0:2], 314)   // version
 		binary.BigEndian.PutUint16(accept[4:6], 8192)  // SDU
-		binary.BigEndian.PutUint16(accept[6:8], 65535)  // TDU
-		binary.BigEndian.PutUint16(accept[12:14], 16)
+		binary.BigEndian.PutUint16(accept[6:8], 65535) // TDU
+	}
+
+	// Accept data length = 0; dataOffset = 40 (no accept data follows).
+	binary.BigEndian.PutUint16(accept[10:12], 0)
+	binary.BigEndian.PutUint16(accept[12:14], 40)
+
+	// For version >= 315, include uint32 SDU/TDU at payload[24:32].
+	version := binary.BigEndian.Uint16(accept[0:2])
+	if version >= 315 {
+		if len(connectPayload) >= 58 {
+			// Echo back the uint32 values go-ora embedded in the CONNECT packet
+			// at payload offsets [50:54] (SDU) and [54:58] (TDU).
+			copy(accept[24:28], connectPayload[50:54])
+			copy(accept[28:32], connectPayload[54:58])
+		} else {
+			binary.BigEndian.PutUint32(accept[24:28], 0x200000) // SDU default
+			binary.BigEndian.PutUint32(accept[28:32], 0x200000) // TDU default
+		}
 	}
 
 	return accept

@@ -34,7 +34,11 @@ services:
       - ./certs/out:/certs:ro
       - ./vault:/vault-config:ro
       - vault-data:/vault/data
-    command: sh -c "chown -R vault:vault /vault/data && runuser -u vault -- vault server -config=/vault-config/config.hcl"
+      - vault-plugins:/vault/plugins
+    entrypoint:
+      - sh
+      - -c
+      - "cp /vault/plugins-baked/vault-plugin-database-oracle /vault/plugins/ && chmod 755 /vault/plugins/vault-plugin-database-oracle && chown -R vault:vault /vault/data && runuser -u vault -- vault server -config=/vault-config/config.hcl"
     user: root
     healthcheck:
       test: ["CMD-SHELL", "VAULT_ADDR=https://127.0.0.1:8200 VAULT_CACERT=/certs/ca.crt VAULT_CLIENT_CERT=/certs/proxy-server.crt VAULT_CLIENT_KEY=/certs/proxy-server.key vault status || [ $? -eq 2 ]"]
@@ -59,6 +63,7 @@ services:
     volumes:
       - ./certs/out:/certs:ro
       - ./vault:/vault-setup:ro
+      - vault-plugins:/vault/plugins:ro
     entrypoint: /bin/sh
     command: /vault-setup/setup.sh
     restart: "no"
@@ -97,3 +102,4 @@ services:
 
 volumes:
   vault-data:
+  vault-plugins:
