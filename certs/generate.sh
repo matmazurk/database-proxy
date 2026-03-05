@@ -42,6 +42,22 @@ mkdir -p "$VAULT_TLS"
 cp "$OUT/vault-server.crt" "$VAULT_TLS/tls.crt"
 cp "$OUT/vault-server.key" "$VAULT_TLS/tls.key"
 
+# Oracle TCPS cert (SAN=DNS:oracle for proxy→oracle TLS verification)
+openssl genrsa -out "$OUT/oracle-server.key" 2048
+openssl req -new -key "$OUT/oracle-server.key" -out "$OUT/oracle-server.csr" \
+  -subj "/CN=oracle"
+openssl x509 -req -in "$OUT/oracle-server.csr" -CA "$OUT/ca.crt" -CAkey "$OUT/ca.key" \
+  -CAcreateserial -out "$OUT/oracle-server.crt" -days 365 \
+  -extfile <(printf "subjectAltName=DNS:oracle")
+
+# Oracle Wallet PKCS12 bundle (no passphrase — orapki import_pkcs12 uses -pkcs12pwd "")
+openssl pkcs12 -export \
+  -in "$OUT/oracle-server.crt" \
+  -inkey "$OUT/oracle-server.key" \
+  -certfile "$OUT/ca.crt" \
+  -out "$OUT/oracle.p12" \
+  -passout pass:
+
 # Cleanup CSRs
 rm -f "$OUT"/*.csr "$OUT"/*.srl
 
