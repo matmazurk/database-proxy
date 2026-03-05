@@ -13,10 +13,10 @@ up: certs
 	docker compose up --build
 
 up-oracle: certs
-	DB_TYPE=oracle DB_ADDR=oracle:1521 VAULT_DB_ROLE=oracle-readonly docker compose up --build
+	DB_TYPE=oracle DB_ADDR=oracle:2484 VAULT_DB_ROLE=oracle-readonly docker compose up --build
 
 test-oracle: certs
-	DB_TYPE=oracle DB_ADDR=oracle:1521 VAULT_DB_ROLE=oracle-readonly \
+	DB_TYPE=oracle DB_ADDR=oracle:2484 VAULT_DB_ROLE=oracle-readonly \
 		docker compose --profile test up --build \
 		--exit-code-from integration-test integration-test
 
