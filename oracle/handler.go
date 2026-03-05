@@ -13,7 +13,10 @@ import (
 )
 
 // Handler implements proxy.DBHandler for Oracle Database using TNS protocol.
-type Handler struct{}
+// OracleTLS configures TLS for the proxy→Oracle leg. When nil, plain TCP is used.
+type Handler struct {
+	OracleTLS *tls.Config
+}
 
 func (h *Handler) HandleClient(clientConn net.Conn, _ *tls.Config) (io.ReadWriteCloser, string, error) {
 	// Oracle clients connect with plain TNS (no TLS/SSLRequest)
@@ -49,7 +52,16 @@ func (h *Handler) ConnectAndAuth(dbAddr string, creds *proxy.DBCredentials, serv
 	portNum := 1521
 	fmt.Sscanf(port, "%d", &portNum)
 
-	connURL := go_ora.BuildUrl(host, portNum, serviceName, creds.Username, creds.Password, nil)
+	var urlOpts map[string]string
+	// SSL VERIFY=FALSE is intentional for the ping: it is a short-lived credential
+	// check only; the long-lived relay socket below uses full TLS verification via h.OracleTLS.
+	if h.OracleTLS != nil {
+		urlOpts = map[string]string{
+			"SSL":        "TRUE",
+			"SSL VERIFY": "FALSE",
+		}
+	}
+	connURL := go_ora.BuildUrl(host, portNum, serviceName, creds.Username, creds.Password, urlOpts)
 
 	db, err := sql.Open("oracle", connURL)
 	if err != nil {
@@ -67,9 +79,14 @@ func (h *Handler) ConnectAndAuth(dbAddr string, creds *proxy.DBCredentials, serv
 
 	log.Printf("oracle credentials verified for user=%s service=%s", creds.Username, serviceName)
 
-	// Open a raw TCP connection to Oracle for the relay. AcceptClient will complete the
+	// Open a raw connection to Oracle for the relay. AcceptClient will complete the
 	// TNS CONNECT/ACCEPT handshake on this socket before traffic is relayed.
-	oracleConn, err := net.Dial("tcp", dbAddr)
+	var oracleConn net.Conn
+	if h.OracleTLS != nil {
+		oracleConn, err = tls.Dial("tcp", dbAddr, h.OracleTLS)
+	} else {
+		oracleConn, err = net.Dial("tcp", dbAddr)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("raw connect to oracle: %w", err)
 	}
