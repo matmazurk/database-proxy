@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
 	"log"
 	"os"
 
@@ -17,7 +20,11 @@ func main() {
 	case "postgres":
 		handler = &postgres.Handler{}
 	case "oracle":
-		handler = &oracle.Handler{}
+		oracleTLSConfig, err := buildOracleTLSConfig(os.Getenv("TLS_CA"))
+		if err != nil {
+			log.Fatalf("building oracle TLS config: %v", err)
+		}
+		handler = &oracle.Handler{OracleTLS: oracleTLSConfig}
 	default:
 		log.Fatalf("unsupported DB_TYPE: %s", dbType)
 	}
@@ -47,4 +54,20 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func buildOracleTLSConfig(caPath string) (*tls.Config, error) {
+	caPEM, err := os.ReadFile(caPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading CA cert %s: %w", caPath, err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("failed to parse CA cert")
+	}
+	return &tls.Config{
+		RootCAs:    pool,
+		ServerName: "oracle",
+		MinVersion: tls.VersionTLS12,
+	}, nil
 }
