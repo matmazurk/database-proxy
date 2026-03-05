@@ -257,6 +257,25 @@ func buildOKPacket() []byte {
 	}
 }
 
+// parseAuthSwitchRequest parses an AuthSwitchRequest payload (first byte 0xFE).
+// Returns the plugin name and challenge bytes.
+func parseAuthSwitchRequest(payload []byte) (pluginName string, challenge []byte, err error) {
+	if len(payload) == 0 || payload[0] != 0xFE {
+		return "", nil, fmt.Errorf("expected AuthSwitchRequest (0xFE), got 0x%02x", payload[0])
+	}
+	end := bytes.IndexByte(payload[1:], 0x00)
+	if end < 0 {
+		return "", nil, fmt.Errorf("no null terminator in AuthSwitchRequest plugin name")
+	}
+	pluginName = string(payload[1 : 1+end])
+	challenge = payload[1+end+1:]
+	// Strip trailing null if present
+	if len(challenge) > 0 && challenge[len(challenge)-1] == 0x00 {
+		challenge = challenge[:len(challenge)-1]
+	}
+	return pluginName, challenge, nil
+}
+
 // extractErrMessage extracts the human-readable message from an ERR_Packet payload.
 func extractErrMessage(payload []byte) string {
 	// ERR: 0xFF(1) + error_code(2) + '#'(1) + sql_state(5) + message
