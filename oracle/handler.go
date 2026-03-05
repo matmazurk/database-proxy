@@ -18,9 +18,23 @@ type Handler struct {
 	OracleTLS *tls.Config
 }
 
-func (h *Handler) HandleClient(clientConn net.Conn, _ *tls.Config) (io.ReadWriteCloser, string, error) {
-	// Oracle clients connect with plain TNS (no TLS/SSLRequest)
-	pkt, err := readTNSPacket(clientConn)
+func (h *Handler) HandleClient(clientConn net.Conn, tlsConfig *tls.Config) (io.ReadWriteCloser, string, error) {
+	// Oracle always uses TCPS: TLS handshake happens immediately after TCP connect, before any TNS.
+	// This proxy does not support plain-TCP Oracle connections.
+	if tlsConfig == nil {
+		return nil, "", fmt.Errorf("HandleClient: tlsConfig is required for Oracle TCPS")
+	}
+	// Oracle clients don't present a client certificate; clone the config and clear
+	// ClientAuth so the handshake doesn't require one.
+	serverTLS := tlsConfig.Clone()
+	serverTLS.ClientAuth = tls.NoClientCert
+	tlsConn := tls.Server(clientConn, serverTLS)
+	if err := tlsConn.Handshake(); err != nil {
+		tlsConn.Close()
+		return nil, "", fmt.Errorf("TLS handshake with oracle client: %w", err)
+	}
+
+	pkt, err := readTNSPacket(tlsConn)
 	if err != nil {
 		return nil, "", fmt.Errorf("reading TNS packet: %w", err)
 	}
@@ -38,7 +52,7 @@ func (h *Handler) HandleClient(clientConn net.Conn, _ *tls.Config) (io.ReadWrite
 
 	// Store the connect payload on the connection for later use in AcceptClient
 	return &clientConn_{
-		Conn:           clientConn,
+		Conn:           tlsConn,
 		connectPayload: pkt.payload,
 	}, serviceName, nil
 }
