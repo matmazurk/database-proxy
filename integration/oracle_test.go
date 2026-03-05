@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"encoding/binary"
 	"fmt"
@@ -70,7 +71,9 @@ func oracleDB(t *testing.T) *sql.DB {
 	// 230 bytes (sending it out-of-band instead), which breaks the proxy's
 	// SERVICE_NAME extraction. The default CID embeds the full program path.
 	connStr := go_ora.BuildUrl(host, portNum, serviceName, oracleUser, oraclePass, map[string]string{
-		"CID": "(CID=(PROGRAM=test)(HOST=test)(USER=test))",
+		"CID":        "(CID=(PROGRAM=test)(HOST=test)(USER=test))",
+		"SSL":        "TRUE",
+		"SSL VERIFY": "FALSE",
 	})
 	db, err := sql.Open("oracle", connStr)
 	if err != nil {
@@ -110,7 +113,8 @@ func TestOracleProxy_InvalidClient(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	// The proxy should close the connection after failing to parse a TNS packet.
+	// The proxy should close the connection. With TCPS, it fails at the TLS
+	// handshake before ever reading a TNS packet; either way the connection closes.
 	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		t.Fatalf("SetReadDeadline: %v", err)
 	}
@@ -210,7 +214,8 @@ func TestOracleProxy_UnknownServiceName(t *testing.T) {
 	pkt[4] = 1 // tnsConnect
 	copy(pkt[8:], payload)
 
-	conn, err := net.DialTimeout("tcp", proxyAddr, 5*time.Second)
+	tlsCfg := &tls.Config{InsecureSkipVerify: true} //nolint:gosec // integration test only
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", proxyAddr, tlsCfg)
 	if err != nil {
 		t.Fatalf("dial proxy: %v", err)
 	}
