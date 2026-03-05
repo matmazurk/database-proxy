@@ -172,5 +172,12 @@ func (h *Handler) ConnectAndAuth(dbAddr string, creds *proxy.DBCredentials, dbNa
 }
 
 func (h *Handler) AcceptClient(clientIO io.ReadWriteCloser, dbConn net.Conn) (net.Conn, error) {
-	return nil, fmt.Errorf("not implemented")
+	occ, ok := clientIO.(*clientConn_)
+	if !ok {
+		return nil, fmt.Errorf("AcceptClient: expected *clientConn_, got %T", clientIO)
+	}
+	if err := writePacket(occ.Conn, occ.handshakeSeq+1, buildOKPacket()); err != nil {
+		return nil, fmt.Errorf("sending OK to mysql client: %w", err)
+	}
+	return dbConn, nil
 }
