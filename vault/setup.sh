@@ -69,4 +69,20 @@ vault write database/roles/oracle-readonly \
   default_ttl="1h" \
   max_ttl="24h"
 
+# Configure MySQL connection
+vault write database/config/mysql \
+  plugin_name=mysql-database-plugin \
+  connection_url="{{username}}:{{password}}@tcp(mysql:3306)/" \
+  allowed_roles="mysql-readonly" \
+  username="root" \
+  password="mysql"
+
+# Create MySQL readonly role
+# IDENTIFIED WITH mysql_native_password ensures the proxy's SHA1-based auth works.
+vault write database/roles/mysql-readonly \
+  db_name=mysql \
+  creation_statements="CREATE USER '{{name}}'@'%' IDENTIFIED WITH mysql_native_password BY '{{password}}'; GRANT SELECT ON *.* TO '{{name}}'@'%';" \
+  default_ttl="1h" \
+  max_ttl="24h"
+
 echo "Vault setup complete"

@@ -29,6 +29,19 @@ services:
       - ./oracle/tcps:/tcps-config:ro
       - ./oracle/tcps/setup-tcps.sh:/container-entrypoint-initdb.d/01-setup-tcps.sh:ro
 
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+      MYSQL_DATABASE: testdb
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-pmysql"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
   vault:
     build: ./vault
     cap_add:
@@ -59,6 +72,8 @@ services:
       postgres:
         condition: service_healthy
       oracle:
+        condition: service_healthy
+      mysql:
         condition: service_healthy
     environment:
       VAULT_ADDR: "https://vault:8200"
