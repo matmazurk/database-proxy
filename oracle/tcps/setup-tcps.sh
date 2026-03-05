@@ -21,6 +21,12 @@ TNS_DIR="${ORACLE_HOME}/network/admin"
 cp /tcps-config/sqlnet.ora "${TNS_DIR}/sqlnet.ora"
 cp /tcps-config/listener.ora "${TNS_DIR}/listener.ora"
 
-# Reload the listener to activate the new TCPS endpoint without dropping
-# existing service registrations (avoids ORA-12514 race on first startup).
-lsnrctl reload
+# Restart the listener to activate the new TCPS endpoint.
+# Then wait for Oracle to re-register its services (avoids ORA-12514 on first startup).
+lsnrctl stop
+lsnrctl start
+
+for i in $(seq 1 60); do
+  lsnrctl status 2>/dev/null | grep -qi "freepdb1" && break
+  sleep 2
+done
