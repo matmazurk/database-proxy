@@ -12,6 +12,7 @@ import (
 const (
 	tnsConnect = 1
 	tnsAccept  = 2
+	tnsResend  = 11
 )
 
 // TNS header is 8 bytes:

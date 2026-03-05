@@ -123,13 +123,25 @@ func (h *Handler) AcceptClient(clientIO io.ReadWriteCloser, dbConn net.Conn) err
 		return fmt.Errorf("forwarding CONNECT to oracle: %w", err)
 	}
 
-	// Read Oracle's response to our forwarded CONNECT.
-	oraclePkt, err := readTNSPacket(dbConn)
-	if err != nil {
-		return fmt.Errorf("reading oracle response: %w", err)
-	}
-	if oraclePkt.packetType != tnsAccept {
-		return fmt.Errorf("expected TNS ACCEPT from oracle (type %d), got type %d", tnsAccept, oraclePkt.packetType)
+	// Oracle may reply with RESEND (type 11) requesting the CONNECT be retransmitted.
+	// Loop until we receive ACCEPT.
+	var oraclePkt *tnsPacket
+	for {
+		var err error
+		oraclePkt, err = readTNSPacket(dbConn)
+		if err != nil {
+			return fmt.Errorf("reading oracle response: %w", err)
+		}
+		if oraclePkt.packetType == tnsResend {
+			if err := writeTNSPacket(dbConn, connectPkt); err != nil {
+				return fmt.Errorf("resending CONNECT to oracle: %w", err)
+			}
+			continue
+		}
+		if oraclePkt.packetType != tnsAccept {
+			return fmt.Errorf("expected TNS ACCEPT from oracle (type %d), got type %d", tnsAccept, oraclePkt.packetType)
+		}
+		break
 	}
 
 	// Tell the client auth succeeded. The ACCEPT payload is built from the client's CONNECT
