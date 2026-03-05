@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"bytes"
+	"encoding/hex"
 	"testing"
 )
 
@@ -64,6 +65,33 @@ func TestBuildInitialHandshake_SSLCapability(t *testing.T) {
 	caps := capsLow | capsHigh<<16
 	if caps&capSSL == 0 {
 		t.Fatal("CLIENT_SSL capability not set in initial handshake")
+	}
+}
+
+func TestBuildParseInitialHandshake_RoundTrip(t *testing.T) {
+	challenge := make([]byte, 20)
+	for i := range challenge {
+		challenge[i] = byte(i + 1)
+	}
+	payload := buildInitialHandshake(42, challenge)
+	hs, err := parseInitialHandshake(payload)
+	if err != nil {
+		t.Fatalf("parseInitialHandshake: %v", err)
+	}
+	if !bytes.Equal(hs.challenge, challenge) {
+		t.Fatalf("challenge mismatch: want %x, got %x", challenge, hs.challenge)
+	}
+	if hs.pluginName != "mysql_native_password" {
+		t.Fatalf("pluginName: want mysql_native_password, got %q", hs.pluginName)
+	}
+}
+
+func TestNativePasswordAuth_KnownAnswer(t *testing.T) {
+	challenge := []byte("12345678901234567890")
+	want, _ := hex.DecodeString("1957dce2724282e018f40d905824cb6361f88d41")
+	got := nativePasswordAuth("password", challenge)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("want %x, got %x", want, got)
 	}
 }
 
