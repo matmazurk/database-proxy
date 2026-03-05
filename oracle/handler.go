@@ -108,10 +108,10 @@ func (h *Handler) ConnectAndAuth(dbAddr string, creds *proxy.DBCredentials, serv
 	return oracleConn, nil
 }
 
-func (h *Handler) AcceptClient(clientIO io.ReadWriteCloser, dbConn net.Conn) error {
+func (h *Handler) AcceptClient(clientIO io.ReadWriteCloser, dbConn net.Conn) (net.Conn, error) {
 	occ, ok := clientIO.(*clientConn_)
 	if !ok {
-		return fmt.Errorf("AcceptClient: expected *clientConn_, got %T", clientIO)
+		return nil, fmt.Errorf("AcceptClient: expected *clientConn_, got %T", clientIO)
 	}
 
 	// Forward the original CONNECT to Oracle so it can complete its side of the handshake.
@@ -120,26 +120,36 @@ func (h *Handler) AcceptClient(clientIO io.ReadWriteCloser, dbConn net.Conn) err
 		payload:    occ.connectPayload,
 	}
 	if err := writeTNSPacket(dbConn, connectPkt); err != nil {
-		return fmt.Errorf("forwarding CONNECT to oracle: %w", err)
+		return nil, fmt.Errorf("forwarding CONNECT to oracle: %w", err)
 	}
 
 	// Oracle may reply with RESEND (type 11) requesting the CONNECT be retransmitted.
+	// When RESEND has flag bit 3 set (0x08) in an SSL/TLS session, Oracle requires a
+	// fresh TLS renegotiation on the same underlying TCP connection before the client
+	// re-sends the CONNECT (matching go-ora's behaviour in network/session.go readPacket).
 	// Loop until we receive ACCEPT.
 	var oraclePkt *tnsPacket
 	for {
 		var err error
 		oraclePkt, err = readTNSPacket(dbConn)
 		if err != nil {
-			return fmt.Errorf("reading oracle response: %w", err)
+			return nil, fmt.Errorf("reading oracle response: %w", err)
 		}
 		if oraclePkt.packetType == tnsResend {
+			if h.OracleTLS != nil && oraclePkt.flag&0x08 != 0 {
+				// Oracle requests TLS renegotiation: create a new TLS session on
+				// the same TCP socket (the existing session is left to be GC'd).
+				tcpConn := dbConn.(*tls.Conn).NetConn()
+				dbConn = tls.Client(tcpConn, h.OracleTLS)
+				log.Printf("oracle RESEND requested TLS renegotiation")
+			}
 			if err := writeTNSPacket(dbConn, connectPkt); err != nil {
-				return fmt.Errorf("resending CONNECT to oracle: %w", err)
+				return nil, fmt.Errorf("resending CONNECT to oracle: %w", err)
 			}
 			continue
 		}
 		if oraclePkt.packetType != tnsAccept {
-			return fmt.Errorf("expected TNS ACCEPT from oracle (type %d), got type %d", tnsAccept, oraclePkt.packetType)
+			return nil, fmt.Errorf("expected TNS ACCEPT from oracle (type %d), got type %d", tnsAccept, oraclePkt.packetType)
 		}
 		break
 	}
@@ -153,10 +163,10 @@ func (h *Handler) AcceptClient(clientIO io.ReadWriteCloser, dbConn net.Conn) err
 		payload:    acceptPayload,
 	}
 	if err := writeTNSPacket(occ.Conn, pkt); err != nil {
-		return fmt.Errorf("sending TNS ACCEPT to client: %w", err)
+		return nil, fmt.Errorf("sending TNS ACCEPT to client: %w", err)
 	}
 
-	return nil
+	return dbConn, nil
 }
 
 // clientConn_ wraps a net.Conn and stores the original CONNECT payload

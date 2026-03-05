@@ -27,6 +27,7 @@ const tnsHeaderSize = 8
 // tnsPacket represents a raw TNS packet.
 type tnsPacket struct {
 	packetType byte
+	flag       byte   // header[5]: protocol flags (e.g. bit 3 = SSL renegotiate on RESEND)
 	payload    []byte // everything after the 8-byte header
 }
 
@@ -49,6 +50,7 @@ func readTNSPacket(r io.Reader) (*tnsPacket, error) {
 
 	return &tnsPacket{
 		packetType: header[4],
+		flag:       header[5],
 		payload:    payload,
 	}, nil
 }

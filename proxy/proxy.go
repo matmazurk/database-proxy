@@ -113,8 +113,11 @@ func (p *Proxy) handleConnection(clientRaw net.Conn) {
 	}
 	defer dbConn.Close()
 
-	// 4. Tell client auth succeeded
-	if err := p.handler.AcceptClient(clientIO, dbConn); err != nil {
+	// 4. Tell client auth succeeded.
+	// relayConn may differ from dbConn if the handler performed a protocol-level
+	// renegotiation (e.g. Oracle TCPS RESEND with SSL re-handshake).
+	relayConn, err := p.handler.AcceptClient(clientIO, dbConn)
+	if err != nil {
 		log.Printf("accepting client: %v", err)
 		return
 	}
@@ -122,8 +125,8 @@ func (p *Proxy) handleConnection(clientRaw net.Conn) {
 	// 5. Bidirectional relay
 	log.Printf("starting relay")
 	errc := make(chan error, 2)
-	go func() { _, err := io.Copy(dbConn, clientIO); errc <- err }()
-	go func() { _, err := io.Copy(clientIO, dbConn); errc <- err }()
+	go func() { _, err := io.Copy(relayConn, clientIO); errc <- err }()
+	go func() { _, err := io.Copy(clientIO, relayConn); errc <- err }()
 	<-errc
 	log.Printf("connection closed")
 }
