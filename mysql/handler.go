@@ -10,7 +10,6 @@ import (
 	"log"
 	"net"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/matmazurk/database-proxy/proxy"
 )
 

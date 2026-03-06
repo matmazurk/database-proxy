@@ -3,14 +3,12 @@ module github.com/matmazurk/database-proxy
 go 1.25.4
 
 require (
-	github.com/go-sql-driver/mysql v1.9.3
 	github.com/hashicorp/vault/api v1.22.0
 	github.com/sijms/go-ora/v2 v2.9.0
 	github.com/xdg-go/scram v1.2.0
 )
 
 require (
-	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
