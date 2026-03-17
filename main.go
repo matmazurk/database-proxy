@@ -40,7 +40,8 @@ func main() {
 		DBAddr:      envOrDefault("DB_ADDR", envOrDefault("PG_ADDR", "localhost:5432")),
 		VaultAddr:   envOrDefault("VAULT_ADDR", "https://localhost:8200"),
 		VaultCACert: os.Getenv("VAULT_CA_CERT"),
-		VaultDBRole: envOrDefault("VAULT_DB_ROLE", "readonly"),
+		VaultDBRole:   envOrDefault("VAULT_DB_ROLE", "readonly"),
+		ClientCertDir: os.Getenv("CLIENT_CERT_DIR"),
 	}
 
 	p, err := proxy.New(cfg, handler)

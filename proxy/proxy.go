@@ -8,24 +8,25 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 )
 
 type Config struct {
-	ListenAddr  string
-	TLSCert     string
-	TLSKey      string
-	TLSCA       string
-	DBAddr      string
-	VaultAddr   string
-	VaultCACert string
-	VaultDBRole string
+	ListenAddr    string
+	TLSCert       string
+	TLSKey        string
+	TLSCA         string
+	DBAddr        string
+	VaultAddr     string
+	VaultCACert   string
+	VaultDBRole   string
+	ClientCertDir string // directory containing <cn>.crt and <cn>.key files
 }
 
 type Proxy struct {
-	cfg         Config
-	tlsConfig   *tls.Config
-	vaultClient *vaultClient
-	handler     DBHandler
+	cfg       Config
+	tlsConfig *tls.Config
+	handler   DBHandler
 }
 
 func New(cfg Config, handler DBHandler) (*Proxy, error) {
@@ -49,21 +50,10 @@ func New(cfg Config, handler DBHandler) (*Proxy, error) {
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 	}
 
-	vaultCACert := cfg.VaultCACert
-	if vaultCACert == "" {
-		vaultCACert = cfg.TLSCA
-	}
-
-	vaultClient, err := newVaultClient(cfg.VaultAddr, vaultCACert, cfg.TLSCert, cfg.TLSKey)
-	if err != nil {
-		return nil, fmt.Errorf("creating Vault client: %w", err)
-	}
-
 	return &Proxy{
-		cfg:         cfg,
-		tlsConfig:   tlsConfig,
-		vaultClient: vaultClient,
-		handler:     handler,
+		cfg:       cfg,
+		tlsConfig: tlsConfig,
+		handler:   handler,
 	}, nil
 }
 
@@ -97,15 +87,28 @@ func (p *Proxy) handleConnection(clientRaw net.Conn) {
 	}
 	defer clientIO.Close()
 
-	// 2. Get DB credentials from Vault
-	creds, err := p.vaultClient.getDBCredentials(p.cfg.VaultDBRole)
+	// 2. Build a per-connection Vault client using the connecting client's cert
+	// when ClientCertDir is configured, otherwise fall back to the proxy's own cert.
+	certPath, keyPath := p.clientCertAndKey(clientIO)
+	vaultCACert := p.cfg.VaultCACert
+	if vaultCACert == "" {
+		vaultCACert = p.cfg.TLSCA
+	}
+	vc, err := newVaultClient(p.cfg.VaultAddr, vaultCACert, certPath, keyPath)
+	if err != nil {
+		log.Printf("creating Vault client: %v", err)
+		return
+	}
+
+	// 3. Get DB credentials from Vault
+	creds, err := vc.getDBCredentials(p.cfg.VaultDBRole)
 	if err != nil {
 		log.Printf("Vault get creds failed: %v", err)
 		return
 	}
 	log.Printf("got Vault credentials: user=%s", creds.Username)
 
-	// 3. Connect to database and authenticate
+	// 4. Connect to database and authenticate
 	dbConn, err := p.handler.ConnectAndAuth(p.cfg.DBAddr, creds, dbName)
 	if err != nil {
 		log.Printf("connecting to database: %v", err)
@@ -113,7 +116,7 @@ func (p *Proxy) handleConnection(clientRaw net.Conn) {
 	}
 	defer dbConn.Close()
 
-	// 4. Tell client auth succeeded.
+	// 5. Tell client auth succeeded.
 	// relayConn may differ from dbConn if the handler performed a protocol-level
 	// renegotiation (e.g. Oracle TCPS RESEND with SSL re-handshake).
 	relayConn, err := p.handler.AcceptClient(clientIO, dbConn)
@@ -122,11 +125,43 @@ func (p *Proxy) handleConnection(clientRaw net.Conn) {
 		return
 	}
 
-	// 5. Bidirectional relay
+	// 6. Bidirectional relay
 	log.Printf("starting relay")
 	errc := make(chan error, 2)
 	go func() { _, err := io.Copy(relayConn, clientIO); errc <- err }()
 	go func() { _, err := io.Copy(clientIO, relayConn); errc <- err }()
 	<-errc
 	log.Printf("connection closed")
+}
+
+// connStater is satisfied by *tls.Conn and any wrapper that promotes ConnectionState.
+type connStater interface {
+	ConnectionState() tls.ConnectionState
+}
+
+// clientCertAndKey returns the cert/key paths to use for Vault authentication.
+// If ClientCertDir is set and the client presented a certificate, it uses
+// <ClientCertDir>/<cn>.crt and <ClientCertDir>/<cn>.key.
+// Otherwise it falls back to the proxy's own cert/key.
+func (p *Proxy) clientCertAndKey(clientIO io.ReadWriteCloser) (certPath, keyPath string) {
+	if p.cfg.ClientCertDir != "" {
+		if cn, err := p.clientCN(clientIO); err == nil {
+			return filepath.Join(p.cfg.ClientCertDir, cn+".crt"),
+				filepath.Join(p.cfg.ClientCertDir, cn+".key")
+		}
+	}
+	return p.cfg.TLSCert, p.cfg.TLSKey
+}
+
+// clientCN extracts the Common Name from the peer certificate on clientIO.
+func (p *Proxy) clientCN(clientIO io.ReadWriteCloser) (string, error) {
+	cs, ok := clientIO.(connStater)
+	if !ok {
+		return "", fmt.Errorf("connection type %T does not expose TLS state", clientIO)
+	}
+	state := cs.ConnectionState()
+	if len(state.PeerCertificates) == 0 {
+		return "", fmt.Errorf("no peer certificate on connection")
+	}
+	return state.PeerCertificates[0].Subject.CommonName, nil
 }
