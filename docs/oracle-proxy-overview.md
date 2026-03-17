@@ -13,7 +13,7 @@ flowchart LR
     subgraph Proxy["Database Proxy"]
         direction TB
         P1["HandleClient<br/>TLS handshake + TNS CONNECT"]
-        P2["clientCertAndKey<br/>falls back to proxy cert (no client cert)"]
+        P2["clientCertAndKey<br/>falls back to proxy cert"]
         P3["getDBCredentials<br/>Vault cert auth (per-conn)"]
         P4["ConnectAndAuth<br/>ping + raw TNS handshake"]
         P5["AcceptClient<br/>TNS ACCEPT to client + relay"]
@@ -52,7 +52,6 @@ sequenceDiagram
     Note over P: Extract service name
 
     Note over P,V: Step 2 — Vault credential fetch
-    Note over P: clientCN fails (no peer cert) → fall back to proxy cert
     P->>V: mTLS cert auth (proxy cert, per-connection)
     V->>P: Auth OK + token
     P->>V: GET /v1/database/creds/oracle-readonly
@@ -60,7 +59,7 @@ sequenceDiagram
 
     Note over P,O: Step 3a — Credential validation (ping, discarded)
     P->>O: TCP connect (go-ora driver)
-    P->>O: TLS handshake (SSL VERIFY=FALSE)
+    P->>O: TLS handshake 
     P->>O: Full TNS auth (Vault creds)
     O->>P: Auth OK
     P-xO: Connection closed (ping only)
