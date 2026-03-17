@@ -13,10 +13,11 @@ flowchart LR
     subgraph Proxy["Database Proxy"]
         direction TB
         P1["HandleClient<br/>TLS + cert identity"]
-        P2["getDBCredentials<br/>Vault cert auth"]
-        P3["ConnectAndAuth<br/>TNS handshake"]
-        P4["AcceptClient<br/>OK + relay"]
-        P1 --> P2 --> P3 --> P4
+        P2["clientCertAndKey<br/>resolve cert by CN"]
+        P3["getDBCredentials<br/>Vault cert auth (per-conn)"]
+        P4["ConnectAndAuth<br/>TNS handshake"]
+        P5["AcceptClient<br/>OK + relay"]
+        P1 --> P2 --> P3 --> P4 --> P5
     end
 
     subgraph Vault["HashiCorp Vault"]
@@ -30,10 +31,10 @@ flowchart LR
     end
 
     C -- "TCP / TLS + client cert" --> P1
-    P2 -- "mTLS cert auth" --> V1
-    V2 -- "short-lived user + password" --> P3
-    P3 -- "TCP / TNS CONNECT" --> O1
-    P4 -- "raw relay" --> O1
+    P3 -- "mTLS (client cert by CN)" --> V1
+    V2 -- "short-lived user + password" --> P4
+    P4 -- "TCP / TNS CONNECT" --> O1
+    P5 -- "raw relay" --> O1
 ```
 
 ```mermaid
@@ -54,7 +55,8 @@ sequenceDiagram
     Note over P: Extract database name
 
     Note over P,V: Step 2 — Vault credential fetch
-    P->>V: TLS cert auth (mTLS)
+    Note over P: Resolve client cert by CN (ClientCertDir)
+    P->>V: mTLS cert auth (client cert, per-connection)
     V->>P: Auth OK + token
     P->>V: GET /v1/database/creds/oracle-readonly
     V->>P: username + password (short-lived)
@@ -90,7 +92,7 @@ sequenceDiagram
 **Connection flow:**
 
 1. Client connects over TLS presenting a client certificate — the proxy validates the cert (CN is logged for identity)
-2. Proxy authenticates to Vault using its own TLS certificate and fetches a short-lived Oracle username/password
+2. Proxy resolves the client's cert/key by CN from `ClientCertDir`, creates a per-connection Vault client authenticated with that cert, and fetches a short-lived Oracle username/password (falls back to the proxy's own cert when `ClientCertDir` is unset)
 3. Proxy connects to Oracle, completes the TNS handshake with Vault credentials
 4. Proxy sends TNS ACCEPT to the client; raw bidirectional relay begins
 
